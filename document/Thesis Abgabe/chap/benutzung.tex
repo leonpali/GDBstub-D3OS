@@ -1,0 +1,58 @@
+\chapter{Benutzung}
+In diesem Kapitel wird die Verwendung von GDB zusammen mit dem Stub erklärt. Um den Stub zu verwenden, muss D3OS entweder in QEMU oder auf echter Hardware laufen. Wenn D3OS in QEMU ausgeführt wird, reicht ein zweites Terminal um GDB und den Stub zu verbinden. Dabei müssen in der QEMU konfiguration mindestens drei serielle Ports aktiviert sein, da auf \texttt{Com1} und \texttt{Com2} verschiedene Logger laufen. Außerdem muss der Stub auf \texttt{Com3} eingestellt sein.\\
+ Um den Stub auf echter Hardware verwenden zu können, müssen alle Logger und andere Komponenten, die den seriellen Port verwenden, abgeschaltet oder auskommentiert sein. Genaueres dazu wird im Kapitel Evaluation beschrieben. Außerdem muss im BIOS des Rechners der richtige serielle Port ausgewählt werden, den der Stub verwendet. Außerdem müssen die beiden Rechner über ein entsprechendes Kabel verbunden sein. Der verwendete \texttt{ComPort} kann in der Datei \texttt{gdbconnection.rs} geändert werden.
+
+\section{Kompilieren}
+Der Stub wartet bei der Initialisierung darauf, dass GDB sich verbindet und hält dabei das System an. Damit man D3OS ohne eine Verbindung zu GDB verwenden kann, darf der Stub also nicht initialisiert sein. Um nicht immer händisch die Initialisierung aus dem Bootprozess entfernen zu müssen, ist sie durch \texttt{Cargo Features} abgesichert. Das bedeutet, dass der Aufruf der Initialisierungsfunktion und der Stub selbst nur kompiliert werden, wenn eine entsprechende Feature-Flag gesetzt ist \cite{rust-lang}. Dazu kann beim kompilieren von D3OS der Befehl \texttt{cargo make --no-workspace gdbstub} verwendet werden. 
+
+\section{Verwendung im Terminal}
+Wenn GDB im Terminal verwendet wird, kann eine Verbindung zum Stub über den Befehl \texttt{target remote [Gerät Name]} hergestellt werden \cite{gdb}. Im Fall von QEMU ist der Befehl \texttt{target remote localhost:4321}, während er beim Testen auf Hardware \texttt{target remote \textbackslash dev\textbackslash ttyUSB0} war. Es kann außerdem sein, dass die Geschwindigkeit, mit der GDB Daten überträgt angepasst werden muss, wenn man den Stub auf Hardware verwendet. Dazu kann der Befehl \texttt{set serial baud [BaudRate]} verwendet werden \cite{gdb}. Die BaudRate, auf die der Stub eingestellt ist, ist aktuell 115200. Zusätzlich muss eine Datei mit der entsprechenden Symboltabelle geladen werden. Für den Kernel geht das über den Befehl \texttt{file pfad/zur/datei/kernel.elf} und für User-Space Anwendungen ,mit \texttt{add-symbol-file pfad/zur/datei} \cite{gdb}. Das System bleibt angehalten, bis ein Continue-Befehl geschickt wird. Die verschiedenen Funktionen, die der Stub anbietet und die jeweiligen Befehle sind \cite{gdb}:
+
+\begin{itemize}
+\item Verbindung aufbauen: \texttt{target remote [Gerät Name]}
+\item Debug Pakete: \texttt{set debug remote 1}
+\item ACK-Mode: \texttt{set remote noack-packet off}
+\item Übertragungsrate anpassen: \texttt{set serial baud [x]}
+\item Ausführung fortfahren: \texttt{continue} oder \texttt{c}
+\item Single Step (Step Into): \texttt{step} oder \texttt{s}
+\item Single Step (Step Over): \texttt{next} oder \texttt{n}
+\item Single Step (Maschineninstruktionen): \texttt{stepi/si} oder \texttt{nexti/ni}
+\item Software Breakpoint setzen: \texttt{break} gefolgt von der Adresse/Funktion/Zeile
+\item Hardware Breakpoint setzen: \texttt{hbreak} gefolgt von der Adresse/Funktion/Zeile
+\item Breakpoint entfernen: \texttt{delete [n]}
+\item Register lesen: \texttt{info registers}
+\item Variabelwert lesen: \texttt{print [Name]} oder \texttt{p [Name]}
+\item Speicher auslesen: \texttt{x/[n|Format|Größe] [Adresse]}, die ersten zwei Integer in einem Vec zum Beispiel: \texttt{x/2dw [Adresse]}
+\item Instanz-Felder auslesen: \texttt{p [InstanzName].[FeldName]}
+\item Ausführung anhalten: \texttt{Ctrl + C} drücken
+\item Funktion bei Step Into ignorieren: \texttt{skip} gefolgt von einer Datei/Funktion/Ausdruck
+\end{itemize}
+
+
+\section{Verwendung mit VS Code}
+Der Stub kann auch mit der graphischen Benutzeroberfläche von Visual Studio Code verwendet werden. Dazu müssen die entsprechenden Extensions zur Nutzung von GDB installiert sein und eine Konfiguration für den Stub in der Datei \texttt{launch.json} angelegt werden. Abhängig davon, wie man sich verbinden will, muss \texttt{localhost:4321} durch das entsprechende Gerät ausgetauscht werden. Weitere Befehle, wie die Debug Ausgaben, können ebenfalls hinzugefügt werden, indem man \texttt{setupCommands} ergänzt.
+
+\begin{codeblock}{launch.json}{JSON}
+\begin{jsoncode}
+\{
+    ''name'': ''gdbstub'',\\
+    ''type'': ''cppdbg'',\\
+    ''request'': ''launch'',\\
+    ''program'': ''\$\{workspaceFolder\}/loader/kernel.elf'', \\
+    ''cwd'': ''\$\{workspaceFolder\}'',\\
+    ''miDebuggerPath'': ''rust-gdb'',\\
+    ''stopAtEntry'': true,\\
+    ''setupCommands'': [\\
+        \{
+            ''text'': ''-enable-pretty-printing''
+        \},\\
+        \{
+            ''text'': ''set disassembly-flavor intel''
+        \},\\
+        \{
+            ''text'': ''target remote localhost:4321''
+        \}\\
+    ]\\
+\}
+\end{jsoncode}
+\end{codeblock}
