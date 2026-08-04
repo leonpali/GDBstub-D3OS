@@ -1,0 +1,122 @@
+[config]
+skip_core_tasks = true
+skip_git_env_info = true
+skip_rust_env_info = true
+skip_crate_env_info = true
+
+[env.development]
+BUILD_DIRECTORY = "${CARGO_MAKE_CRATE_TARGET_DIRECTORY}/d3os_kernel/debug"
+CARGO_BUILD_OPTION = "--lib"
+
+[env.production]
+BUILD_DIRECTORY = "${CARGO_MAKE_CRATE_TARGET_DIRECTORY}/d3os_kernel/release"
+CARGO_BUILD_OPTION = "--release"
+
+[env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+CARGO_CFG_TARGET_FAMILY = "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/d3os_kernel.json"
+RUST_TARGET_PATH = "${CARGO_MAKE_WORKING_DIRECTORY}"
+SOURCE_DIRECTORY = "${CARGO_MAKE_WORKING_DIRECTORY}/src"
+LIBRARY_DIRECTORY = "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/os/library"
+LINKER_FILE = "${CARGO_MAKE_WORKING_DIRECTORY}/link.ld"
+RUST_OBJECT = "${BUILD_DIRECTORY}/lib${CARGO_MAKE_PROJECT_NAME}.a"
+ASM_OBJECT = "${BUILD_DIRECTORY}/boot.o"
+GDB_TRAP_OBJECT = "${BUILD_DIRECTORY}/gdb_interrupt_handler.o"
+KERNEL = "${BOOTLOADER_DIRECTORY}/${CARGO_MAKE_PROJECT_NAME}.elf"
+
+[tasks.default]
+alias = "link"
+
+# Build tasks
+
+[tasks.compile]
+command = "cargo"
+args = [ "build", "-Z", "build-std=core,alloc", "-Z", "build-std-features=compiler-builtins-mem", "--target", "${CARGO_CFG_TARGET_FAMILY}", "${CARGO_BUILD_OPTION}" ]
+condition = { files_modified = { input = [
+    "${CARGO_MAKE_WORKING_DIRECTORY}/Cargo.toml", "${SOURCE_DIRECTORY}/**/*.rs",
+    "${LIBRARY_DIRECTORY}/graphic/Cargo.toml", "${LIBRARY_DIRECTORY}/graphic/src/**/*.rs",
+    "${LIBRARY_DIRECTORY}/stream/Cargo.toml", "${LIBRARY_DIRECTORY}/stream/src/**/*.rs",
+    "${LIBRARY_DIRECTORY}/syscall/Cargo.toml", "${LIBRARY_DIRECTORY}/syscall/src/**/*.rs" ], output = [ "${BUILD_DIRECTORY}/lib${CARGO_MAKE_PROJECT_NAME}*" ] } }
+
+[tasks.build-asm]
+command = "nasm"
+args = [ "-f", "elf64", "-w+error=label-redef-late", "-o", "${ASM_OBJECT}", "${SOURCE_DIRECTORY}/boot.asm" ]
+condition = { files_modified = { input = [ "${SOURCE_DIRECTORY}/boot.asm" ], output = [ "${BUILD_DIRECTORY}/boot.o" ] } }
+
+[tasks.link]
+command = "${LINKER}"
+args = [ "-n", "-T", "${LINKER_FILE}", "-o", "${KERNEL}", "${ASM_OBJECT}", "${RUST_OBJECT}", "-z", "noexecstack" ]
+dependencies = [ "compile", "build-asm" ]
+condition = { files_modified = { input = [ "${BUILD_DIRECTORY}/lib${CARGO_MAKE_PROJECT_NAME}*", "${LINKER_FILE}" ], output = [ "${BOOTLOADER_DIRECTORY}/kernel.elf" ] } }
+
+[tasks.check]
+command = "cargo"
+args = [ "check", "-Z", "build-std=core,alloc", "-Z", "build-std-features=compiler-builtins-mem", "--target", "${CARGO_CFG_TARGET_FAMILY}", "${CARGO_BUILD_OPTION}" ]
+
+[tasks.clippy]
+command = "cargo"
+args = [ "clippy", "-Z", "build-std=core,alloc", "-Z", "build-std-features=compiler-builtins-mem", "--target", "${CARGO_CFG_TARGET_FAMILY}", "${CARGO_BUILD_OPTION}" ]
+
+[tasks.gdbstub]
+dependencies = [ "link-gdbstub" ]
+
+[tasks.compile-gdbstub]
+env = { RUSTFLAGS = "--cfg getrandom_backend=\"rdrand\" -C force-frame-pointers=yes -C debuginfo=2 -C opt-level=0" }
+command = "cargo"
+args = [
+    "build",
+    "-Z", "build-std=core,alloc",
+    "-Z", "build-std-features=compiler-builtins-mem",
+    "--target", "${CARGO_CFG_TARGET_FAMILY}",
+    "${CARGO_BUILD_OPTION}",
+    "--features", "gdbstub"
+]
+condition = { files_modified = { input = [
+    "${CARGO_MAKE_WORKING_DIRECTORY}/Cargo.toml",
+    "${SOURCE_DIRECTORY}/**/*.rs",
+    "${LIBRARY_DIRECTORY}/graphic/Cargo.toml",
+    "${LIBRARY_DIRECTORY}/graphic/src/**/*.rs",
+    "${LIBRARY_DIRECTORY}/stream/Cargo.toml",
+    "${LIBRARY_DIRECTORY}/stream/src/**/*.rs",
+    "${LIBRARY_DIRECTORY}/syscall/Cargo.toml",
+    "${LIBRARY_DIRECTORY}/syscall/src/**/*.rs"
+], output = [ "${BUILD_DIRECTORY}/lib${CARGO_MAKE_PROJECT_NAME}*" ] } }
+
+[tasks.link-gdbstub]
+command = "${LINKER}"
+args = [
+    "-n",
+    "-T", "${LINKER_FILE}",
+    "-o", "${KERNEL}",
+    "${ASM_OBJECT}",
+    "${GDB_TRAP_OBJECT}",
+    "${RUST_OBJECT}",
+    "-z", "noexecstack"
+]
+dependencies = [ "compile-gdbstub", "build-asm", "build-gdb-trap-asm" ]
+condition = { files_modified = { input = [
+    "${BUILD_DIRECTORY}/lib${CARGO_MAKE_PROJECT_NAME}*",
+    "${LINKER_FILE}",
+    "${GDB_TRAP_OBJECT}"
+], output = [ "${BOOTLOADER_DIRECTORY}/kernel.elf" ] } }
+
+[tasks.build-gdb-trap-asm]
+command = "nasm"
+args = [
+    "-f", "elf64",
+    "-w+error=label-redef-late",
+    "-o", "${GDB_TRAP_OBJECT}",
+    "${SOURCE_DIRECTORY}/gdb_interrupt_handler.asm"
+]
+condition = { files_modified = { input = [ "${SOURCE_DIRECTORY}/gdb_interrupt_handler.asm" ], output = [ "${GDB_TRAP_OBJECT}" ] } }
+
+# Cleanup tasks
+
+[tasks.clean]
+command = "cargo"
+args = [ "clean" ]
+dependencies = [ "remove-kernel" ]
+
+[tasks.remove-kernel]
+command = "rm"
+args = [ "-f", "${KERNEL}" ]
